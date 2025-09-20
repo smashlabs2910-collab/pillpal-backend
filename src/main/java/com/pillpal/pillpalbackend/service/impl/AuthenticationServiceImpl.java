@@ -19,6 +19,8 @@ import java.util.UUID;
 @Service
 public class AuthenticationServiceImpl implements AuthenticationService {
 
+    private static final long REFRESH_TOKEN_EXPIRY_MS = 30L * 24 * 60 * 60 * 1000;
+
     private final RequestValidator requestValidator;
     private final UserService userService;
     private final RefreshTokenService refreshTokenService;
@@ -31,7 +33,6 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         this.jwtUtil = jwtUtil;
     }
 
-
     @Override
     public JwtResponse registerUser(RegisterRequest registerRequest) {
         requestValidator.validateRegisterRequest(registerRequest);
@@ -40,8 +41,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 registerRequest.getEmail(),
                 registerRequest.getPassword()
         );
-
-        return generateAndStoreTokens(user,registerRequest.getDeviceId());
+        return generateAndStoreTokens(user, registerRequest.getDeviceId());
     }
 
     @Override
@@ -51,7 +51,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         if (user == null) {
             throw new InvalidCredentialsException();
         }
-        return generateAndStoreTokens(user,loginRequest.getDeviceId());
+        return generateAndStoreTokens(user, loginRequest.getDeviceId());
     }
 
     @Override
@@ -59,43 +59,42 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         requestValidator.validateRefreshTokenRequest(refreshTokenRequest);
         String refreshToken = refreshTokenRequest.getRefreshToken();
         String deviceId = refreshTokenRequest.getDeviceId();
-        requestValidator.validateRefreshTokenRequest(refreshTokenRequest);
         String userId = jwtUtil.getUserIdFromToken(refreshToken);
-        Optional<RefreshToken> storedTokenOpt = refreshTokenService.validateRefreshTokenForDevice(refreshToken,UUID.fromString(userId), deviceId);
+        Optional<RefreshToken> storedTokenOpt = refreshTokenService.validateRefreshTokenForDevice(refreshToken, UUID.fromString(userId), deviceId);
         RefreshToken storedToken = storedTokenOpt.orElseThrow(InvalidRefreshTokenException::new);
-        String newAccessToken = jwtUtil.generateAccessToken(userId);
-        String newRefreshTokenRaw = jwtUtil.generateRefreshToken(userId);
-        String hashedToken = TokenHashUtil.hashToken(newRefreshTokenRaw);
-        refreshTokenService.createOrUpdateRefreshToken(storedToken.getUser(), deviceId, hashedToken, 30L * 24 * 60 * 60 * 1000);
-        return new JwtResponse(newAccessToken, newRefreshTokenRaw, deviceId);
+        return generateAndStoreTokens(storedToken.getUser(), deviceId);
     }
 
     @Override
     public void logoutUser(LogoutRequest logoutRequest) {
+        requestValidator.validateLogoutRequest(logoutRequest);
         String refreshToken = logoutRequest.getRefreshToken();
         String deviceId = logoutRequest.getDeviceId();
-        requestValidator.validateLogoutRequest(logoutRequest);
         String userId = jwtUtil.getUserIdFromToken(refreshToken);
         User user = userService.findById(userId);
-        refreshTokenService.deleteByUserAndDeviceId(user, deviceId);
+        if (user != null) {
+            refreshTokenService.deleteByUserAndDeviceId(user, deviceId);
+        }
     }
 
     @Override
     public void logoutUserFromAllDevices(LogoutAllDevicesRequest logoutAllDevicesRequest) {
-        String refreshToken = logoutAllDevicesRequest.getRefreshToken();
         requestValidator.validateLogoutAllDevicesRequest(logoutAllDevicesRequest);
-        String userId = jwtUtil.getUserIdFromToken(logoutAllDevicesRequest.getRefreshToken());
+        String refreshToken = logoutAllDevicesRequest.getRefreshToken();
+        String userId = jwtUtil.getUserIdFromToken(refreshToken);
         User user = userService.findById(userId);
-        refreshTokenService.deleteByUser(user);
+        if (user != null) {
+            refreshTokenService.deleteByUser(user);
+        }
     }
 
     private JwtResponse generateAndStoreTokens(User user, String deviceId) {
-        String accessToken = jwtUtil.generateAccessToken(String.valueOf(user.getId()));
-        String refreshTokenRaw = jwtUtil.generateRefreshToken(String.valueOf(user.getId()));
+        String userId = String.valueOf(user.getId());
+        String accessToken = jwtUtil.generateAccessToken(userId);
+        String refreshTokenRaw = jwtUtil.generateRefreshToken(userId);
         String hashedToken = TokenHashUtil.hashToken(refreshTokenRaw);
-        refreshTokenService.createOrUpdateRefreshToken(user, deviceId, hashedToken, 30L * 24 * 60 * 60 * 1000);
+        refreshTokenService.createOrUpdateRefreshToken(user, deviceId, hashedToken, REFRESH_TOKEN_EXPIRY_MS);
         return new JwtResponse(accessToken, refreshTokenRaw, deviceId);
     }
-
-
 }
+
