@@ -29,7 +29,15 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // allow authentication APIs
                         .requestMatchers("/api/auth/**").permitAll()
+                        // allow Swagger and OpenAPI docs
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**"
+                        ).permitAll()
+                        // everything else requires authentication
                         .anyRequest().authenticated()
                 );
 
